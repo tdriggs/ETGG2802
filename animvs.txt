@@ -1,0 +1,37 @@
+#version 150
+
+in vec3 a_position;
+in vec2 a_texcoord;
+in vec3 a_normal;
+in float a_boneidx;
+
+out vec2 v_texcoord;
+out vec3 v_normal;
+out vec3 v_worldPos;
+
+uniform mat4 worldMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projMatrix;
+
+uniform sampler2D boneparents;
+uniform sampler2D bonequats;
+uniform sampler2D boneheads;
+
+uniform float frame;
+
+
+void main(){
+    vec4 p = vec4(a_position,1.0);
+    p = computePos(p,int(a_boneidx),frame);
+    p = p * worldMatrix;
+    v_worldPos = p.xyz;
+    p = p * viewMatrix;
+    p = p * projMatrix;
+    gl_Position = p;
+    v_texcoord = a_texcoord;
+    
+    vec4 n = vec4(a_normal, 0.0 );
+    n = computePos(n,int(a_boneidx),frame);
+    n = n * worldMatrix;
+    v_normal = n.xyz;
+}

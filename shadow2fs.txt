@@ -1,0 +1,134 @@
+#version 150
+
+in vec2 v_texcoord;
+in vec3 v_normal;
+in vec3 v_worldPos;
+
+uniform sampler2D tex;
+uniform sampler2D etex;
+uniform sampler2D stex;
+
+uniform vec3 eyePos;
+uniform vec4 border;
+
+#define MAX_LIGHTS 5
+
+uniform vec3 lightPos[MAX_LIGHTS];
+uniform vec4 lightColor[MAX_LIGHTS];
+uniform mat4 light_viewMatrix[MAX_LIGHTS];
+uniform mat4 light_projMatrix[MAX_LIGHTS];
+uniform vec3 light_hitheryon[MAX_LIGHTS];
+uniform sampler2D shadowbuffer1;
+uniform sampler2D shadowbuffer2;
+uniform sampler2D shadowbuffer3;
+uniform sampler2D shadowbuffer4;
+uniform sampler2D shadowbuffer5;
+
+out vec4 color;
+
+float calculateDiffuse(int lightDex)
+{
+	float diffuse = 0.0;
+	
+	vec3 N = normalize(v_normal);
+    vec3 L = normalize(lightPos[lightDex] - v_worldPos);	
+	diffuse += dot(L, N);
+
+	return clamp (diffuse, 0.0, 1.0);
+}
+
+vec3 calculateSpecular(int lightDex)
+{
+	vec3 specular = vec3(0, 0, 0);
+
+	vec3 N = normalize(v_normal);
+    vec3 V = normalize(eyePos - v_worldPos);
+    vec3 L = normalize(lightPos[lightDex] - v_worldPos);
+	vec3 R = reflect(-L, N);
+	float r = 12.0;
+	vec3 H = normalize(L+V);
+	float cos_a = dot(V,N);
+	float cos_b = dot(N,L);
+	float cos_c = dot(V,H);
+	float cos_d = dot(H,N);
+	vec3 sqrtk = sqrt(min(texture(tex ,v_texcoord).rgb,vec3(0.95)));
+	vec3 n = (-vec3(1.0) - sqrtk)/(sqrtk - vec3(1.0));
+	vec3 q = sqrt(vec3(cos_c)*vec3(cos_c)-vec3(1.0)+n*n);
+	vec3 f1 = q-vec3(cos_c);
+	vec3 f2 = q+vec3(cos_c);
+	vec3 f3 = (f2*cos_c) - vec3(1);
+	vec3 f4 = (f1*cos_c) + vec3(1);
+	vec3 F = vec3(0.5)*((f1/f2)*(f1/f2))*(vec3(1)+((f3/f4)*(f3/f4)));
+	float cos2d = cos_d *cos_d;
+	float M = r * exp(r*(1 - (1/cos2d)))/(4.0*cos2d*cos2d);
+	float A = clamp((2*(cos_d)*min(cos_a,cos_b))/cos_c,0.0,1.0);
+	vec3 tempSpecular = vec3(M)*F*vec3(A)/(cos_a*cos_b*vec3(3.14159265358979323));
+	tempSpecular *= sign(dot(N,L));
+	specular += tempSpecular;
+	
+	return vec3(clamp (specular.x, 0.0, 1.0), clamp (specular.y, 0.0, 1.0), clamp (specular.z, 0.0, 1.0)) * texture(stex, v_texcoord).rgb;
+}
+
+vec3 calculateEmittance()
+{
+	return texture(etex, v_texcoord).rgb;
+}
+
+float calculateShadowMod(int lightDex, sampler2D sb)
+{
+	float shadowAmount = 1.0f;
+
+	vec4 pe = vec4(v_worldPos, 1) * light_viewMatrix[lightDex];
+	vec4 ps = pe * light_projMatrix[lightDex];
+	ps /= ps.w;
+	vec2 tc = vec2(ps.x + 1, ps.y + 1) / 2;
+	float t1 = texture(sb, tc).r;
+	t1 = light_hitheryon[lightDex][0] + t1 * light_hitheryon[lightDex][2];
+
+	//float distance = (tc.x - 0.5) * (tc.x - 0.5) + (tc.y - 0.5) * (tc.y - 0.5);
+	//if(distance >= 0.25 || -pe.z < 0.5 || -pe.z > t1 + 0.005)
+	bvec2 a = lessThan(tc.xy,vec2(0,0));
+	bvec2 b = greaterThan(tc.xy,vec2(1.0,1.0));
+	if(any(a) || any(b)  || -pe.z < 0.5 || -pe.z > t1 + 0.005)
+	{
+		shadowAmount = 0.2f;
+	}
+
+	return shadowAmount;
+}
+
+vec3 calculateBorderColor(vec3 mixColor)
+{
+	vec3 result = mixColor;
+
+	vec2 tmp = vec2(1,1) - v_texcoord;
+    tmp = min( tmp,v_texcoord);
+    float t = min(tmp.x,tmp.y);
+    if( t < border.w )
+	{
+        t = (border.w-t)/border.w;
+        result.rgb = mix(border.rgb, result.rgb, 1-t);
+	}
+
+	return result;
+}
+
+void main()
+{
+    color = texture(tex, v_texcoord);
+
+	float shadow1 = calculateShadowMod(0, shadowbuffer1);
+	float shadow2 = calculateShadowMod(1, shadowbuffer2);
+	float shadow3 = calculateShadowMod(2, shadowbuffer3);
+	float shadow4 = calculateShadowMod(3, shadowbuffer4);
+	float shadow5 = calculateShadowMod(4, shadowbuffer5);
+
+	color.rgb *= ((calculateDiffuse(0) + calculateSpecular(0)) * shadow1) +
+				 ((calculateDiffuse(1) + calculateSpecular(1)) * shadow2) +
+				 ((calculateDiffuse(2) + calculateSpecular(2)) * shadow3) +
+				 ((calculateDiffuse(3) + calculateSpecular(3)) * shadow4) +
+				 ((calculateDiffuse(4) + calculateSpecular(4)) * shadow5);
+	
+    color.rgb += calculateEmittance();
+	color.rgb = calculateBorderColor(color.rgb);
+}
